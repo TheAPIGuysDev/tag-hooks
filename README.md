@@ -3,19 +3,75 @@
 Shared commit-message validation for repositories that release with
 [release-please](https://github.com/googleapis/release-please).
 
-release-please picks the version and writes the changelog from
-[conventional commit](https://www.conventionalcommits.org/) subjects. A malformed
-subject does not fail anything — it silently produces no version bump, and the change
-quietly never appears in a release. This validates the format so that cannot happen.
+## Set up in one command
 
-One implementation, two consumers: a `pre-commit` hook for fast local feedback, and a
-composite GitHub Action for CI. **CI is the gate.** The local hook is convenience — a
-fresh clone, a new contributor or an automated agent will not have installed it.
+```bash
+pre-commit install --install-hooks
+```
 
-## Use it in CI
+That's it. No authentication, no tokens, no accounts. You need `python3`, which you
+almost certainly already have.
 
-Check out with full history, then run the action. Both are required: the check works
-over a commit *range*, which a shallow checkout cannot resolve.
+From then on, a commit with a badly-formatted message is rejected **before** it exists,
+with a message telling you what to fix:
+
+```
+$ git commit -m "fixed the login bug"
+Validate commit message for release-please compatibility.................Failed
+  .git/COMMIT_EDITMSG: commit subject does not match conventional-commit format
+    got: 'fixed the login bug'
+    expected: <type><optional-scope>!?: <description>
+    valid types: fix, feat, chore, docs, refactor, perf, test, ci, build, revert, style
+```
+
+Fix it and commit again:
+
+```bash
+git commit -m "fix(auth): reject expired sessions on refresh"
+```
+
+Don't have `pre-commit`? `pipx install pre-commit` (or `brew install pre-commit`). If you
+skip all this, nothing breaks — CI still checks your commits when you open a pull
+request. You'll just find out later instead of sooner.
+
+## Why the format matters
+
+release-please picks the version number and writes `CHANGELOG.md` from your commit
+subjects. A malformed subject doesn't fail anything — it silently produces **no version
+bump**, and your change quietly never appears in a release.
+
+`fix:` bumps the patch version. `feat:` bumps the minor. Everything else lands in the
+changelog without moving the version.
+
+## Writing a good subject
+
+```
+feat(billing): add annual prepay discount
+fix: stop retaining driver logs after container removal
+docs(pricing): record the 2026 rate card
+chore(deps): bump astro from 6.3.3 to 7.1.1
+```
+
+The scope in parentheses is optional. `!` before the colon marks a breaking change
+(`feat!: drop v1 endpoints`).
+
+A few cases behave in ways worth knowing:
+
+| If you… | What happens |
+| --- | --- |
+| are mid-merge (`git merge`) | skipped — git generates those subjects, they aren't yours to format |
+| use `git commit --fixup` | allowed locally, so `git rebase --autosquash` still works. Rejected in CI, because one reaching `main` means the squash was forgotten |
+| use the Revert button on the forge | rejected. release-please can't parse `Revert "…"` either, so it would vanish from the changelog. Write `revert(scope): what you reverted` |
+| write `Breaking change:` in the body | rejected. Only the exact `BREAKING CHANGE: ` or `BREAKING-CHANGE: ` is recognised — a miscased footer ships a breaking change as a silent minor bump |
+
+---
+
+## Adding it to a repository
+
+Two layers. **CI is the gate; the local hook is convenience** — a fresh clone, a new
+contributor or an automated agent won't have installed it.
+
+### CI
 
 ```yaml
 name: Commit messages
@@ -40,10 +96,13 @@ jobs:
       - uses: TheAPIGuysDev/tag-hooks/.github/actions/commit-message-gate@<sha> # v1.0.0
 ```
 
-Make that job a **required status check** on your default branch. A workflow that runs
-but is not required does not gate anything.
+`fetch-depth: 0` is required — the check works over a commit *range*, which a shallow
+checkout can't resolve.
 
-## Use it locally
+Then make that job a **required status check** on your default branch. A workflow that
+runs but isn't required doesn't gate anything.
+
+### Local
 
 ```yaml
 # .pre-commit-config.yaml
@@ -56,22 +115,15 @@ repos:
       - id: commit-message-format
 ```
 
-```bash
-pre-commit install --install-hooks
-```
-
 `default_install_hook_types` matters: a plain `pre-commit install` wires only the
 pre-commit stage and silently skips `commit-msg`, so the hook would never fire.
 
-Requires `python3` on the machine. The script is standard-library only.
+### Extra commit types
 
-## Extra commit types
-
-The canonical list is `fix, feat, chore, docs, refactor, perf, test, ci, build, revert,
-style`. A repo needing more passes its own list — **never** by editing this script:
+The default list is `fix, feat, chore, docs, refactor, perf, test, ci, build, revert,
+style`. A repo needing more passes its own — **never** by editing this script:
 
 ```yaml
-      - uses: TheAPIGuysDev/tag-hooks/.github/actions/commit-message-gate@<sha> # v1.0.0
         with:
           types: fix,feat,chore,docs,refactor,perf,test,ci,build,revert,style,intake
 ```
@@ -82,43 +134,29 @@ style`. A repo needing more passes its own list — **never** by editing this sc
             args: ["--types=fix,feat,...,intake"]
 ```
 
-Keep the CI list and the local list identical, and keep both in step with whatever your
-PR-title lint allows. Lists that disagree produce the confusing case where a commit
-passes one check and fails the other.
+Keep the CI list, the local list and your PR-title lint in step. Lists that disagree
+produce the confusing case where a commit passes one check and fails the other.
 
-## What it enforces
+### Pinning
 
-Subject must match `<type><optional-scope>!?: <description>`. Beyond that, a few
-behaviours exist because the obvious implementation gets them wrong:
-
-| Case | Behaviour | Why |
-| --- | --- | --- |
-| Merge in progress | skipped (local only) | git fires `commit-msg` for every local merge; validating there strands the working tree mid-merge |
-| `fixup!` / `squash!` | allowed locally, rejected in CI | they are autosquash artifacts; one reaching a validated range means the squash was forgotten |
-| `Revert "…"` | rejected, with instructions | release-please cannot parse the forge's revert subject either, so the commit would vanish from the changelog. Use `revert(scope): …` |
-| `Breaking change:` | rejected | only the exact `BREAKING CHANGE: ` / `BREAKING-CHANGE: ` tokens are recognised; a miscased footer ships a breaking change as a silent minor bump |
-| Merge commits, in a range | skipped | their subjects are generated by the forge |
-
-## Behaviour is pinned by tests
-
-`tests/commit_message_cases.json` is a golden corpus of 26 cases. Consuming repos can run
-it against the revision they have pinned — that is how behavioural drift gets detected,
-rather than by reading diffs.
-
-```bash
-python3 -m pytest tests/
-```
-
-## Pinning
-
-Pin by **commit SHA with a version comment**, not by tag. Tags are mutable; a SHA is not.
+Pin by **commit SHA with a version comment**, not by tag — tags are mutable, a SHA isn't.
 
 ```yaml
 rev: 0123456789abcdef0123456789abcdef01234567 # v1.0.0
 ```
 
-Bumping a pin runs new code in your CI and on developer machines — review the diff
-rather than treating it as routine.
+Bumping a pin runs new code in your CI and on developer machines. Review the diff rather
+than treating it as routine.
+
+## Behaviour is pinned by tests
+
+`tests/commit_message_cases.json` is a golden corpus of 26 cases. A consuming repo can run
+it against the revision it has pinned — that's how behavioural drift gets caught, rather
+than by reading diffs.
+
+```bash
+python3 -m pytest tests/
+```
 
 ## Licence
 
