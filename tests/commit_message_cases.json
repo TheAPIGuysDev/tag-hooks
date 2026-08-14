@@ -1,0 +1,171 @@
+{
+  "_comment": "Golden corpus for check-commit-message.py. Every consuming repo can run this same corpus against the revision it has pinned, which is how behavioural drift is detected. 'file' mode = commit-msg hook semantics (autosquash allowed); 'range_subject' = CI range semantics (autosquash rejected). Expected is the process exit code.",
+  "cases": [
+    {
+      "name": "plain_feat",
+      "mode": "file",
+      "input": "feat: add a thing\n",
+      "expected": 0
+    },
+    {
+      "name": "scoped_fix",
+      "mode": "file",
+      "input": "fix(deploy): stop caching icons immutable\n",
+      "expected": 0
+    },
+    {
+      "name": "bang_no_scope",
+      "mode": "file",
+      "input": "feat!: breaking\n",
+      "expected": 0
+    },
+    {
+      "name": "bang_with_scope",
+      "mode": "file",
+      "input": "feat(scope)!: breaking\n",
+      "expected": 0
+    },
+    {
+      "name": "empty_scope_rejected",
+      "mode": "file",
+      "input": "feat(): empty scope\n",
+      "expected": 1
+    },
+    {
+      "name": "uppercase_type_rejected",
+      "mode": "file",
+      "input": "Feat: uppercase\n",
+      "expected": 1,
+      "why": "release-please's real grammar is case-sensitive even though the CC spec says types are case-insensitive; we match the tool, not the spec"
+    },
+    {
+      "name": "space_before_colon_rejected",
+      "mode": "file",
+      "input": "feat : space\n",
+      "expected": 1
+    },
+    {
+      "name": "no_space_after_colon_rejected",
+      "mode": "file",
+      "input": "feat:nospace\n",
+      "expected": 1
+    },
+    {
+      "name": "unknown_type_rejected",
+      "mode": "file",
+      "input": "polish(gate-audit): wrap the control bar\n",
+      "expected": 1,
+      "why": "an unknown type that reached a real main branch before this gate existed"
+    },
+    {
+      "name": "github_revert_button_rejected",
+      "mode": "file",
+      "input": "Revert \"feat(scope): thing\"\n",
+      "expected": 1,
+      "why": "release-please's parser cannot read button-revert subjects either; org convention is manual revert(scope): ..."
+    },
+    {
+      "name": "manual_revert_accepted",
+      "mode": "file",
+      "input": "revert(keap): drop create-opp again\n",
+      "expected": 0
+    },
+    {
+      "name": "comment_only_rejected",
+      "mode": "file",
+      "input": "# all comments\n# nothing else\n",
+      "expected": 1
+    },
+    {
+      "name": "empty_message_rejected",
+      "mode": "file",
+      "input": "\n",
+      "expected": 1
+    },
+    {
+      "name": "crlf_accepted",
+      "mode": "file",
+      "input": "fix: crlf endings\r\nbody line\r\n",
+      "expected": 0
+    },
+    {
+      "name": "unicode_subject_accepted",
+      "mode": "file",
+      "input": "feat: \u652f\u6301\u4e2d\u6587 \ud83c\udf89\n",
+      "expected": 0
+    },
+    {
+      "name": "long_subject_accepted",
+      "mode": "file",
+      "input": "feat: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+      "expected": 0,
+      "why": "deliberate: no length rule; commitlint defaults to 100 but release-please has no limit \u2014 documented gap, not an oversight"
+    },
+    {
+      "name": "fixup_accepted_in_file_mode",
+      "mode": "file",
+      "input": "fixup! feat: x\n",
+      "expected": 0,
+      "why": "autosquash artifact; blocking it breaks git commit --fixup / rebase --autosquash"
+    },
+    {
+      "name": "squash_accepted_in_file_mode",
+      "mode": "file",
+      "input": "squash! feat: x\n",
+      "expected": 0
+    },
+    {
+      "name": "fixup_rejected_in_range_mode",
+      "mode": "range_subject",
+      "input": "fixup! feat: x\n",
+      "expected": 1,
+      "why": "a fixup! escaping to a validated range means the autosquash was forgotten"
+    },
+    {
+      "name": "breaking_footer_exact_accepted",
+      "mode": "file",
+      "input": "feat: x\n\nBREAKING CHANGE: api removed\n",
+      "expected": 0
+    },
+    {
+      "name": "breaking_footer_hyphen_accepted",
+      "mode": "file",
+      "input": "feat: x\n\nBREAKING-CHANGE: api removed\n",
+      "expected": 0
+    },
+    {
+      "name": "breaking_footer_wrong_case_rejected",
+      "mode": "file",
+      "input": "feat: x\n\nBreaking change: api removed\n",
+      "expected": 1,
+      "why": "would ship a breaking change as a silent minor/patch bump \u2014 worse than the failure this gate exists for"
+    },
+    {
+      "name": "breaking_footer_plural_rejected",
+      "mode": "file",
+      "input": "feat: x\n\nBREAKING CHANGES: api removed\n",
+      "expected": 1
+    },
+    {
+      "name": "body_parens_accepted",
+      "mode": "file",
+      "input": "fix: x\n\nmeasured on 2026-08-07 (60 commits) and (parens) are fine\n",
+      "expected": 0,
+      "why": "locks in the retirement of the old no-parens-in-body rule"
+    },
+    {
+      "name": "custom_type_via_types_flag",
+      "mode": "file",
+      "input": "intake: new vendor questionnaire\n",
+      "expected": 0,
+      "types": "fix,feat,chore,docs,refactor,perf,test,ci,build,revert,style,intake",
+      "why": "per-repo vocabulary comes through --types, never by editing the script"
+    },
+    {
+      "name": "custom_type_absent_by_default",
+      "mode": "file",
+      "input": "intake: new vendor questionnaire\n",
+      "expected": 1
+    }
+  ]
+}

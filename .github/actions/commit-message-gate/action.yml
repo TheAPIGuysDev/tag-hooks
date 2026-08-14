@@ -1,0 +1,87 @@
+name: 'Commit message gate'
+description: >-
+  Validate conventional-commit subjects over the triggering event's commit
+  range, for release-please compatibility (this repository). The
+  canonical script ships with this action, so consumers pin one SHA and carry
+  no copy of it.
+
+# Usage in a consuming repo (.github/workflows/commit-messages.yml):
+#
+#   on:
+#     pull_request:
+#     push:
+#       branches: [main]
+#   permissions:
+#     contents: read
+#   jobs:
+#     validate:
+#       name: Validate commit messages   # <- the required-status-check name
+#       runs-on: ubuntu-latest
+#       timeout-minutes: 5
+#       steps:
+#         - uses: actions/checkout@<sha>   # v7.0.1
+#           with:
+#             fetch-depth: 0               # REQUIRED: the range needs history
+#         - uses: TheAPIGuysDev/tag-hooks/.github/actions/commit-message-gate@<sha>
+#           # with:
+#           #   types: fix,feat,...,intake   # only if this repo has extra vocabulary
+#
+# The caller must check out its own repo first — a composite action runs in the
+# caller's workspace, and the range is resolved there. python3 is preinstalled
+# on GitHub-hosted runners and the script is stdlib-only, so no setup-python
+# step is needed.
+
+inputs:
+  types:
+    description: >-
+      Comma-separated allowed commit types. Leave unset for the canonical list.
+      Set only in repos with extra vocabulary — per-repo config belongs in the
+      caller, never in the canonical script.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Determine commit range
+      id: range
+      shell: bash
+      # Event values go through env rather than direct ${{ }} interpolation
+      # into the script body — the hardened pattern for event-derived input.
+      env:
+        EVENT: ${{ github.event_name }}
+        PR_BASE: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        PUSH_BEFORE: ${{ github.event.before }}
+        PUSH_AFTER: ${{ github.sha }}
+      run: |
+        set -eu
+        if [ "$EVENT" = "pull_request" ]; then
+          # base..head is exactly the commits the PR adds, even when the base
+          # branch has moved on (it is a reachability difference, not a span).
+          range="${PR_BASE}..${PR_HEAD}"
+        elif [ "${PUSH_BEFORE:-}" = "0000000000000000000000000000000000000000" ] || [ -z "${PUSH_BEFORE:-}" ]; then
+          # Branch creation carries no meaningful "before"; check the tip only.
+          range="${PUSH_AFTER}~1..${PUSH_AFTER}"
+        else
+          range="${PUSH_BEFORE}..${PUSH_AFTER}"
+        fi
+        echo "range=${range}" >> "$GITHUB_OUTPUT"
+        echo "Validating ${range}"
+
+    - name: Validate
+      shell: bash
+      env:
+        RANGE: ${{ steps.range.outputs.range }}
+        TYPES: ${{ inputs.types }}
+        # GITHUB_ACTION_PATH is this action's directory inside the downloaded
+        # tag-hooks tree, so the canonical script travels with the pin.
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -eu
+        script="${ACTION_PATH}/../../../scripts/check-commit-message.py"
+        if [ -n "$TYPES" ]; then
+          python3 "$script" --range "$RANGE" --types "$TYPES"
+        else
+          python3 "$script" --range "$RANGE"
+        fi

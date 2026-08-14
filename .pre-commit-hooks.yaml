@@ -1,0 +1,22 @@
+# Hooks this repository exports.
+#
+# Consume from any repo:
+#
+#   default_install_hook_types: [pre-commit, commit-msg]
+#   repos:
+#     - repo: https://github.com/TheAPIGuysDev/tag-hooks
+#       rev: <pinned tag or SHA>
+#       hooks:
+#         - id: commit-message-format
+#           # args: ["--types=fix,feat,chore,docs,refactor,perf,test,ci,build,revert,style,<extra>"]
+#
+# The local hook is fast feedback, never the gate: CI (the
+# commit-message-gate action) is the enforcement that survives a fresh clone,
+# and required status checks are what make it binding.
+- id: commit-message-format
+  name: Validate commit message for release-please compatibility
+  language: script
+  entry: scripts/check-commit-message.py
+  stages: [commit-msg]
+  always_run: true
+  pass_filenames: true
