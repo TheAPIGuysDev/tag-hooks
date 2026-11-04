@@ -1,7 +1,8 @@
 # tag-hooks
 
-Shared commit-message validation for repositories that release with
-[release-please](https://github.com/googleapis/release-please).
+Shared pre-commit hooks: commit-message validation for repositories that release with
+[release-please](https://github.com/googleapis/release-please), and a worktree-safe
+gitleaks scan.
 
 ## Set up in one command
 
@@ -147,6 +148,32 @@ rev: 0123456789abcdef0123456789abcdef01234567 # v1.0.0
 
 Bumping a pin runs new code in your CI and on developer machines. Review the diff rather
 than treating it as routine.
+
+## Secret scanning in worktrees: `gitleaks-staged`
+
+The upstream `gitleaks-docker` pre-commit hook mounts only `$PWD` into the container.
+In a git **linked worktree** `.git` is a file pointing at
+`<main>/.git/worktrees/<name>`, which doesn't exist in the container. gitleaks logs
+`fatal: not a git repository`, scans zero commits, exits 0, and pre-commit prints
+**Passed**. Every commit made from a worktree is effectively unscanned.
+
+`gitleaks-staged` fixes that: it runs a pinned gitleaks image, mounting the worktree
+and the git common dir (read-only) at their host paths, and scans the staged changes.
+It fails if docker is missing or gitleaks can't read the repository, rather than
+passing silently. A repo's `.gitleaksignore` and inline `gitleaks:allow` still work.
+
+```yaml
+repos:
+  - repo: https://github.com/TheAPIGuysDev/tag-hooks
+    rev: <sha> # vX.Y.Z
+    hooks:
+      - id: gitleaks-staged
+```
+
+Remove the upstream `gitleaks/gitleaks` / `gitleaks-docker` block when adopting it.
+Requires docker. The image is pinned by digest in `scripts/gitleaks-staged.sh`; when
+you bump it, bump the gitleaks image in your CI job to the same digest so the local
+hook and the gate agree.
 
 ## Behaviour is pinned by tests
 
