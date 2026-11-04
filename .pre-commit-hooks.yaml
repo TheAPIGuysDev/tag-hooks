@@ -9,6 +9,7 @@
 #       hooks:
 #         - id: commit-message-format
 #           # args: ["--types=fix,feat,chore,docs,refactor,perf,test,ci,build,revert,style,<extra>"]
+#         - id: gitleaks-staged   # needs docker; replaces upstream gitleaks-docker
 #
 # The local hook is fast feedback, never the gate: CI (the
 # commit-message-gate action) is the enforcement that survives a fresh clone,
@@ -20,3 +21,10 @@
   stages: [commit-msg]
   always_run: true
   pass_filenames: true
+- id: gitleaks-staged
+  name: gitleaks (staged changes, worktree-safe)
+  description: Pinned-image gitleaks scan that works in git linked worktrees, where the upstream gitleaks-docker hook silently scans nothing.
+  language: script
+  entry: scripts/gitleaks-staged.sh
+  pass_filenames: false
+  always_run: true
