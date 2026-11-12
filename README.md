@@ -72,7 +72,24 @@ A few cases behave in ways worth knowing:
 Two layers. **CI is the gate; the local hook is convenience** — a fresh clone, a new
 contributor or an automated agent won't have installed it.
 
-### CI
+### CI: nothing to add inside TheAPIGuysDev
+
+The organization ruleset **`commit-gate`** runs
+[`.github/workflows/commit-gate.yml`](.github/workflows/commit-gate.yml) from this
+repository, pinned by SHA, on every pull request into the default branch of every
+TheAPIGuysDev repository. Only forks of outside projects are excluded, because their
+upstream syncs carry upstream's commits. The check shows on the pull request as
+**Commit gate**, and the pull request can't merge until it passes. New repositories are
+covered from their first pull request.
+
+All that's left per repository is optional: the [local hook](#local), and
+[`.github/commit-types`](#extra-commit-types) if the repo needs more types than the
+default list.
+
+### CI outside the org ruleset
+
+For a repository outside TheAPIGuysDev, or an excluded fork, add a caller. Inside the
+org it's redundant, since the ruleset already runs the same action.
 
 ```yaml
 name: Commit messages
@@ -122,7 +139,25 @@ pre-commit stage and silently skips `commit-msg`, so the hook would never fire.
 ### Extra commit types
 
 The default list is `fix, feat, chore, docs, refactor, perf, test, ci, build, revert,
-style`. A repo needing more passes its own — **never** by editing this script:
+style`. A repo needing more passes its own — **never** by editing this script.
+
+For the org gate, commit `.github/commit-types` holding the **complete** list, separated
+by commas, spaces or newlines, with `#` comments allowed:
+
+```
+# .github/commit-types
+fix, feat, chore, docs, refactor, perf, test, ci, build, revert, style
+intake   # client intake records
+```
+
+The gate reads it from the pull request's **base** commit, so a pull request can't widen
+the list for its own commits. A change to the list applies to the pull requests opened
+or updated after it merges. Review a change to this file the way you'd review a change to
+CI: a merged change widens the gate for every later pull request. The file must hold
+lowercase words only and stay under 4 KB. Anything else fails the check, as does an API
+error reading it.
+
+For a per-repo caller and the local hook:
 
 ```yaml
         with:
@@ -148,6 +183,10 @@ rev: 0123456789abcdef0123456789abcdef01234567 # v1.0.0
 
 Bumping a pin runs new code in your CI and on developer machines. Review the diff rather
 than treating it as routine.
+
+The org ruleset pins `commit-gate.yml` the same way. A change merged here does nothing
+until the ruleset's pinned SHA is bumped, and that bump is an org ruleset change that
+gets reviewed like any other.
 
 ## Secret scanning in worktrees: `gitleaks-staged`
 

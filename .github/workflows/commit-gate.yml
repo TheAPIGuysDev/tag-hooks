@@ -1,0 +1,102 @@
+name: Commit gate
+
+# The ORG-WIDE commit-message gate. The TheAPIGuysDev organization ruleset
+# "commit-gate" (rule: Require workflows to pass before merging) runs this file,
+# pinned by commit SHA, on every pull request into the default branch of every
+# repository in the organization. New repositories are covered from their first
+# pull request, with nothing to add.
+#
+# It runs in the TARGET repository's context: the checkout below fetches the
+# repository the pull request belongs to, not this one. That is why the gate
+# action is referenced by owner/repo@sha and never by ./ path.
+#
+# Ruleset workflows run on pull_request (filters are ignored) and never on
+# events made with GITHUB_TOKEN. We do not use merge queues, so merge_group is
+# not listed. On this repository's own pull requests the file also runs as an
+# ordinary workflow, which is harmless.
+#
+# Changing this file changes nothing until the ruleset's pinned SHA is bumped,
+# which is a reviewed change to the organization ruleset.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    # Deliberately NOT "Validate commit messages": per-repo callers still use
+    # that name as a required status check, and two checks with one name would
+    # satisfy or block each other.
+    name: Commit gate
+    runs-on: ubuntu-latest
+    # Fails closed: a timeout blocks the merge, so leave headroom for the
+    # largest repositories (about 1 GB on disk).
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # Full history is required: the base..head range cannot be resolved
+          # from a shallow clone. But the gate reads commit messages only, never
+          # file contents, so fetch commits and trees without blobs, and write
+          # almost nothing of the pull request's tree to the workspace.
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: .github
+          persist-credentials: false
+
+      # Per-repo vocabulary. A repository that needs more than the canonical
+      # types commits .github/commit-types: the COMPLETE allowed list, separated
+      # by commas, spaces or newlines, with # comments. It is read from the pull
+      # request's BASE commit, so a pull request cannot widen the list for its
+      # own commits; a list change applies to the pull requests after it merges.
+      # It is read through the API rather than git because the clone above has
+      # no blobs and no credentials to fetch them with.
+      - name: Read .github/commit-types from the base branch
+        id: types
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          file="${RUNNER_TEMP}/commit-types"
+          status=$(curl -sS --max-time 30 --retry 3 -o "$file" -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github.raw+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${GITHUB_API_URL}/repos/${REPO}/contents/.github/commit-types?ref=${BASE}") || true
+          case "$status" in
+            200) ;;
+            404)
+              echo "No .github/commit-types on the base branch: using the canonical list."
+              exit 0 ;;
+            *)
+              # Anything else (rate limit, outage) fails closed rather than
+              # silently falling back to a different list.
+              echo "::error::could not read .github/commit-types at ${BASE} (HTTP ${status})"
+              exit 1 ;;
+          esac
+          if [ "$(wc -c < "$file")" -gt 4096 ]; then
+            echo "::error file=.github/commit-types::larger than 4 KB; it should be one short list"
+            exit 1
+          fi
+          # awk reads all its input, so no early-exit pipeline can mask a bad entry.
+          types=$(sed 's/#.*//' "$file" | tr ', \t\r' '\n\n\n\n' | awk 'NF && !seen[$0]++' | paste -sd, -)
+          if [ -z "$types" ]; then
+            echo "::error file=.github/commit-types::the file lists no types"
+            exit 1
+          fi
+          bad=$(printf '%s\n' "$types" | tr ',' '\n' | awk '!/^[a-z][a-z0-9-]*$/')
+          if [ -n "$bad" ]; then
+            echo "::error file=.github/commit-types::types must be lowercase words (a-z, 0-9, -); got: ${types}"
+            exit 1
+          fi
+          echo "Allowed types (from .github/commit-types): ${types}"
+          echo "types=${types}" >> "$GITHUB_OUTPUT"
+
+      - uses: TheAPIGuysDev/tag-hooks/.github/actions/commit-message-gate@9efe4f9ed30d5c024ca3dbf886ddd6cd4e457f9b # v1.1.0
+        with:
+          types: ${{ steps.types.outputs.types }}
